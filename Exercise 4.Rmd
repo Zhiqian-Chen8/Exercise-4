@@ -1,0 +1,462 @@
+---
+title: "Exercise 4"
+author: "Zhiqian Chen, Yi Zeng, Qihang Liang"
+date: "5/4/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(LICORS) 
+library(foreach)
+library(mosaic)
+library(tidyverse)
+library(ggcorrplot)
+library(arules)
+library(arulesViz)
+library(igraph)
+library(FNN)
+library(tm) 
+library(slam)
+library(proxy)
+```
+
+## 1. Clustering and PCA
+## 1.1 Clustering
+There are two variables about the wine -- color and quality, hence we make two group of cluster, the first group is the cluster of color and the second group is the cluster of quality. First, we clustering the color. Then, we separate the data set into two subset, the first one only for red wine and the second one only for white wine. Then, we center and scale the data, and then extract the centers and scales from the rescaled data which are named attributes.
+```{r, echo=FALSE, include=FALSE}
+wine <- read.csv("wine.csv", header=TRUE)
+redwine = wine[wine$color == 'red',]
+whitewine = wine[wine$color == 'white',]
+wine_quality = wine
+```
+
+## 1.1.1 cluster by color of wine:
+When clustering the data by color of wine, we find that there are two color, hence we make cluster1 and cluster2, then we run k-means clustering with 2 clusters and 25 starts.
+```{r, echo=FALSE, include=FALSE}
+Y = redwine[,(1:11)]
+Y = scale(Y, center=TRUE, scale=TRUE)
+mu_Y = attr(Y,"scaled:center")
+sigma_Y = attr(Y,"scaled:scale")
+clust1 = kmeans(Y, 2, nstart=25)
+clust1$center[1,]*sigma_Y + mu_Y
+clust1$center[2,]*sigma_Y + mu_Y
+
+Z = whitewine[,(1:11)]
+Z = scale(Z, center=TRUE, scale=TRUE)
+mu_Z = attr(Z,"scaled:center")
+sigma_Z = attr(Z,"scaled:scale")
+clust2 = kmeans(Z, 2, nstart=25)
+clust2$center[1,]*sigma_Z + mu_Z
+clust2$center[2,]*sigma_Z + mu_Z
+```
+
+Then we plot some example with cluster membership chemical properties for different color of wine (cluster 1 and cluster 2), from those four plots below, we can see that the different of two clusters.
+```{r, echo=FALSE}
+qplot(pH, density, data=redwine, color=factor(clust1$cluster))
+qplot(pH, density, data=whitewine, color=factor(clust2$cluster))
+qplot(fixed.acidity, volatile.acidity, data=redwine, color=factor(clust1$cluster))
+qplot(fixed.acidity, volatile.acidity, data=whitewine, color=factor(clust2$cluster))
+```
+
+Finally, we want to calculate the accuracy of k-means with 6 clusters and 25 starts clustering. As we can see below, it seems to do an excellent job in clustering wines by their color.
+```{r, echo=FALSE}
+xtabs(~clust1$cluster + redwine$color)
+xtabs(~clust2$cluster + whitewine$color)
+```
+According to the accuracy of k-means with 6 clusters and 25 starts clustering, we believe that k-means clustering is the reduction technique that makes more sense to us for this data. the reason is that we think we can calculate the accuracy and we can break down comparisons by 11 chemical properties.
+
+```{r, echo=FALSE}
+summary(wine$quality)
+```
+
+## 1.1.2 cluster by quality of wine:
+The quality of the wine, is distributed between [1,10]. But the actually value does not necessary be one of those value in the range. Hence, at the beginning, we summary the quality and look how quality is in the data.
+```{r, echo=FALSE}
+summary(wine$quality)
+```
+As we can see, the quality of the wine has minimum 3.0 and maximum 9.0. Hence the range of quality is from a low of 3 and a high of 9. So, here we have total of 7 ratings. Hence, when clustering the quality of wine ,we decide to use k-means clustering with 7 clusters and 25 starts.
+
+```{r, echo=FALSE, include=FALSE}
+quality <- levels(factor(wine$quality)) 
+H = wine[,(1:11)]
+H = scale(H, center=TRUE, scale=TRUE)
+clust5 = kmeanspp(H, k=7, nstart = 25)
+cormatrix <- merge(H, clust5$cluster,by.x=0,by.y=0) %>% select(-Row.names) %>% cor()
+```
+
+Then, we make a correlation matrix, adn below is the plot of heatmap visualization.
+
+```{r, echo=FALSE}
+ggcorrplot::ggcorrplot(corr = cormatrix)
+```
+
+
+Finally, we combine the cluster together and get a graph of clustering by color and quality. And in the graph, we can see that for cluster 1 and cluster 3, red wine quality is focus on 5 to 6. Cluster 2, 4, 6, the white wine quality focus on 5 to 6 too. Cluster 5 the white wine quality focus on 6 to 7. The maximum of the quality are almost in the cluster 5 and we can find that for the wine has quality above 8, a big part of them are white wine.
+
+```{r, echo=FALSE}
+merge(wine, clust5$cluster,by.x=0,by.y=0) %>%
+  rename("cluster" = y) %>% mutate(cluster=factor(cluster)) %>%
+  ggplot()+
+  geom_jitter(aes(x=cluster,y=quality,color=color),alpha=.3)
+```
+
+## 1.2 PCA
+## 1.2.1 PCA by color
+In the second part of this question, we look at the PCA of wine. First, we run the PCA by color. Since there are 11 chemical properties, hence here we only plot three of them (denstiy, pH and fixed.acidity)
+
+```{r, echo=FALSE, include = FALSE}
+wine2 = wine[,(1:11)]
+wine2 = scale(wine2, center=TRUE, scale=TRUE)
+PCAwine = prcomp(wine2, scale=TRUE)
+plot(PCAwine)
+round(PCAwine$rotation[,1:2],2) 
+loadings_summary = PCAwine$rotation %>%
+  as.data.frame() %>%
+  rownames_to_column('chemical_properties')
+wine = merge(wine, PCAwine$x[,1:2], by="row.names")
+```
+
+```{r, echo=FALSE}
+lm1 = lm(density ~ PC1 + PC2, data=wine)
+plot(density ~ fitted(lm1), data=wine)
+lm2 = lm(fixed.acidity ~ PC1 + PC2, data=wine)
+plot(fixed.acidity ~ fitted(lm2), data=wine)
+lm3 = lm(pH ~ PC1 + PC2, data=wine)
+plot(pH~ fitted(lm3), data=wine)
+```
+
+## 1.2.2 PCA by quality
+Then, we run the PCA by quality of wine. Since there are 11 chemical properties, the same as before here we only plot three of them (density, pH and fixed.acidity)
+```{r, echo=FALSE, include= FALSE}
+wine3 = wine_quality[,(1:11)]
+wine3 = scale(wine3, center=TRUE, scale=TRUE)
+PCAwine2 = prcomp(wine3, scale=TRUE)
+round(PCAwine2$rotation[,1:6],2) 
+loadings_summary = PCAwine2$rotation %>%
+  as.data.frame() %>%
+  rownames_to_column('chemical_properties')
+wine_quality = merge(wine_quality, PCAwine2$x[,1:6], by="row.names")
+```
+
+```{r, echo=FALSE}
+lm1 = lm(quality ~ PC1 + PC2+ PC3 + PC4 + PC5 + PC6, data=wine_quality)
+plot(quality ~ fitted(lm1), data=wine_quality)
+lm2 = lm(fixed.acidity ~ PC1 + PC2 +PC3 + PC4 + PC5 + PC6, data=wine_quality)
+plot(fixed.acidity ~ fitted(lm2), data=wine_quality)
+lm3 = lm(pH ~ PC1 + PC2 +PC3 + PC4 + PC5 + PC6, data=wine_quality)
+plot(pH~ fitted(lm3), data=wine_quality)
+lm4 = lm(density ~ PC1 + PC2 +PC3 + PC4 + PC5 + PC6, data=wine_quality)
+plot(pH~ fitted(lm4), data=wine_quality)
+```
+
+
+## 2. Market Segmentation
+
+In the first step, we process the data by deleting users with spam and pornoggarphy. If the user with more than 20% of tweets with adult, we define them as "bots". Therefore, we are left with 7,666 obeservations to analyse market segmentation.
+
+```{r, include=FALSE}
+
+data <- read.csv("social_marketing.csv", row.names=1)
+#drop na
+data1 <- drop_na(data)
+
+#drop user with spam
+data1 <- data1[!(data1$spam>"0"),]
+
+#drop uncategoriezed and chatter
+data1 <- subset(data1,select=-c(uncategorized,chatter))
+
+#total tweet for user:
+tweet <- rowSums(data1[,-1])
+
+#we drop user with more than 20% of tweets relate with adult.
+
+data1 <- data1[data1$adult/tweet < 0.20,]
+
+#dro spam
+data1 <- subset(data1,select=-c(spam))
+
+```
+
+Then we plot SSE, which can help us get k-mean cluster
+
+```{r, echo=FALSE, message= FALSE, warning= FALSE}
+data2 <- data1
+
+# center and scale data
+data2_scaled <- scale(data2, center=TRUE, scale=TRUE) 
+
+k_grid=seq(2,20,by=1)
+sse_grid = foreach(k = k_grid, .combine = 'c')%do%{
+  cluster_k = kmeans(data2, k, nstar=50)
+  cluster_k$tot.withinss
+}
+
+plot(k_grid, sse_grid)
+
+
+```
+
+From graph we can see the elbow is at k = 9, therefore, we set 9 clusters.
+
+Then we plot a heatmap visualization to quick check the clusters' correlation.
+
+```{r,echo=FALSE}
+# a quick heatmap visualization
+a<-data2_scaled[,2:33]
+
+ggcorrplot::ggcorrplot(cor(a), hc.order = TRUE)
+```
+
+
+Then we calculate PCA:
+
+```{r,echo=FALSE}
+data2_PCA = prcomp(data2_scaled, scale=TRUE,
+                   center = TRUE)
+
+plot(data2_PCA)
+summary(data2_PCA)
+```
+
+
+```{r, include=FALSE}
+loadings = data2_PCA$rotation
+
+round(data2_PCA$rotation[,1:33],2) 
+
+loadings_summary = data2_PCA$rotation %>%
+  as.data.frame() %>%
+  rownames_to_column('Category')
+
+# well-received dramas with positive loadings?
+loadings_summary %>%
+  select(Category, PC1) %>%
+  arrange(desc(PC1))
+
+loadings_summary %>%
+  select(Category, PC2) %>%
+  arrange(desc(PC2))
+
+loadings_summary %>%
+  select(Category, PC3) %>%
+  arrange(desc(PC3))
+
+loadings_summary %>%
+  select(Category, PC4) %>%
+  arrange(desc(PC4))
+
+loadings_summary %>%
+  select(Category, PC5) %>%
+  arrange(desc(PC5))
+
+loadings_summary %>%
+  select(Category, PC6) %>%
+  arrange(desc(PC6))
+```
+
+Then we can plot hierarchical clustering
+
+```{r,echo=FALSE}
+#Hierarchical Clustering
+x = loadings[,1]
+y = loadings[,2:6]
+distance_between_XY=dist(cbind(x,y))
+hc = hclust(distance_between_XY, method = 'complete')
+plot(hc, axes=F, xlab='Categories', ylab='Market Segmentation')
+rect.hclust(hc, k=9, border='red')
+```
+
+we can see there are nine groups in the cluster dendogram. It is group of correlated interests. The first group is outdoors, health nutrition, and personal fitness. The second group is tv film, and art. The group three is eco, dating, home and garden , and adult. Group four is  crafts, shopping, current  event, business, and small business. Group five is sport playing, online gaming, and college uni. group six is politics, travel, and computers. Group seven is news and automotive. Group eight is food, religion, and sports fandom, parenting, family, and school. Group nine is photo sharing, cooking, beauty, and fashion.
+
+## 3.Association rules for grocery purchases
+
+```{r,echo=FALSE, include=FALSE, message = FALSE, warning = FALSE}
+groceries_raw = read.csv("groceries.txt",header = FALSE)
+summary(groceries_raw)
+groceries_raw$buyer = seq.int(nrow(groceries_raw))
+groceries = cbind(groceries_raw[,5], stack(lapply(groceries_raw[,1:4], as.character)))[1:2]
+colnames(groceries) = c("buyer","item")
+groceries = groceries[order(groceries$buyer),]
+groceries = groceries[!(groceries$item==""),]
+row.names(groceries) = 1:nrow(groceries)
+groceries$buyer = factor(groceries$buyer)
+grocounts = groceries %>%
+  group_by(item) %>%
+  summarize(count = n()) %>%
+  arrange(desc(count))
+```
+
+```{r,echo=FALSE, message = FALSE, warning = FALSE}
+head(grocounts, 20) %>%
+  ggplot() +
+  geom_col(aes(x=reorder(item, count), y=count)) + 
+  coord_flip()+
+  labs(x="items",y="Quantity")
+```
+
+```{r,echo=FALSE, include=FALSE, message = FALSE, warning = FALSE}
+groceries = split(x=groceries$item, f=groceries$buyer)
+groceries = lapply(groceries, unique)
+grotrans = as(groceries, "transactions")
+
+goodrules = apriori(grotrans, 
+                    parameter=list(support=.01, confidence=.1, minlen=2))
+```
+
+```{r,echo=FALSE, message = FALSE, warning = FALSE}
+plot(goodrules, jitter = 0)
+plot(goodrules, measure = c("support", "lift"), shading = "confidence", jitter = 0)
+plot(goodrules, method='two-key plot', jitter = 0)
+
+plot(head(sort(goodrules, by="support"), 20),
+     method="graph", control=list(cex=.9))
+plot(head(sort(goodrules, by="lift"), 20),
+     method="graph", control=list(cex=.9))
+```
+
+```{r,echo=FALSE, include=FALSE, message = FALSE, warning = FALSE}
+sub1 = subset(goodrules, subset=confidence > 0.01 & support > 0.005)
+summary(sub1)
+```
+
+```{r,echo=FALSE, message = FALSE, warning = FALSE}
+plot(sub1, method='graph')
+plot(head(sub1, 10, by='lift'), method='graph')
+plot(head(sub1, 50, by='lift'), method='graph')
+plot(head(sub1, 100, by='lift'), method='graph')
+```
+
+
+#We can find that:
+
+1.Whole milk occurs with curd and yogurt with high confidence and lift values, indicating the set of people who are regular buyers of dairy products.
+2.Vegetables occur a lot with whipped cream and sour cream indicating a category of people who enjoy the cream products a lot have also higher chances of buying vegetables.
+3.Root vegetables occurs with other vegetables, tropical fruits and citrus fruits indicating the set of people who are very nutrient conscious and prefer mostly fruits and vegetables. It could also be possible that they are more vegetarians as there is no significant association with these products and meat as observed.
+4.Bottled beer has a 90% confidence level and a very high lift value of 11 when used with white wine and red/blush wine. This shows that if people buy beer and liquor, the chance of buying beer will be 11 times higher.
+
+
+## 4. Author attribution
+In the C50train directory, there are 50 articles from each of 50 different authors. And if we look at at the data file, there are two data set, one is C50train (training data) and another is C50test (testing data). Given that each author have only one article in each directory, hence we imported the those two data set by a list, and each author is an element of the list and we use the tm library here since this library allow us to use the readplain fuction which read plain text documents in English. After we imported the two directories, we have the document in a vector, once we have the documents, we create a text mining 'corpus', after that we do some pre-processing steps and use the function tm_map which maps the function to every documents in the corpus.In the pre-procseeing steps, we first make everything lowercase, then remove the numbers, punctuation and excess white-space. After importing the two data set, we create the document-features metrics of the two data set -- DTM_C50train and DTM_C50test, after that we drop the terms that only occur in one of two documents and we removes those terms that has count 0 in 95% of the documents.Finally, we construct TF IDF weights for those two document term matrics.
+
+```{r,echo=FALSE}
+readerPlain = function(fname){
+				readPlain(elem=list(content=readLines(fname)), 
+							id=fname, language='en') }
+
+C50train_dirt = Sys.glob('ReutersC50/C50train/*')
+C50train_list = NULL
+labels_C50train = NULL
+for(author in C50train_dirt) {
+  author_name = substring(author, first=29)
+  files_to_add = Sys.glob(paste0(author, '/*.txt'))
+  C50train_list = append(C50train_list, files_to_add)
+  labels_C50train = append(labels_C50train, rep(author_name, length(files_to_add)))
+}
+corpus_C50train = Corpus(DirSource(C50train_dirt)) 
+corpus_C50train = corpus_C50train %>% tm_map(.,content_transformer(tolower))%>%
+  tm_map(.,content_transformer(removeNumbers)) %>% 
+  tm_map(.,content_transformer(removePunctuation)) %>%
+  tm_map(.,content_transformer(stripWhitespace)) %>%
+  tm_map(.,content_transformer(removeWords), stopwords("SMART"))
+
+C50test_dirt = Sys.glob('ReutersC50/C50test/*')
+C50test_list = NULL
+labels_C50test = NULL
+for(author in C50test_dirt) {
+  author_name = substring(author, first=28)
+  files_to_add = Sys.glob(paste0(author, '/*.txt'))
+  C50test_list = append(C50test_list, files_to_add)
+  labels_C50test = append(labels_C50test, rep(author_name, length(files_to_add)))
+}
+corpus_C50test = Corpus(DirSource(C50test_dirt)) 
+corpus_C50test = corpus_C50test %>% tm_map(., content_transformer(tolower)) %>%
+  tm_map(., content_transformer(removeNumbers)) %>% 
+  tm_map(., content_transformer(removePunctuation)) %>%
+  tm_map(., content_transformer(stripWhitespace)) %>%
+  tm_map(., content_transformer(removeWords), stopwords("SMART"))
+
+DTM_C50train = DocumentTermMatrix(corpus_C50train)
+DTM_C50test = DocumentTermMatrix(corpus_C50test)
+DTM_C50train = removeSparseTerms(DTM_C50train, 0.95)
+DTM_C50test = removeSparseTerms(DTM_C50test, 0.95)
+
+tfidf_C50train = weightTfIdf(DTM_C50train)
+tfidf_C50test = weightTfIdf(DTM_C50test)
+```
+
+After importing and pre-processing the two data set. We cluster the document by the method of the tree. And then when we plot the tree we find that the diagram is mass, hence we cannot see anything from the diagram (since the digram is too mass, hence we didn't include it in the pdf), the result indicates that the dimensional of two data set are too high. Then we decide to reduce the dimensional. We apply the method of PCA which is the same as the example in class. Our goal is to built the model to predicted the authorship of the articles in C50test directory. Also, we need to deal with words in the test set that we never saw in the training set. By summary the pca of both training and testing set, we find that there are too much, when we try to run the code, R studio shows that it is out of script, there maybe some problems with my computer or it is just that the principle components are too many, hence we reduce some components.
+
+```{r,echo=FALSE, include=FALSE}
+tfidf_train = weightTfIdf(DTM_C50train)
+tfidf_test = weightTfIdf(DTM_C50test)
+cosine_dist_mat = proxy::dist(as.matrix(tfidf_train), method='cosine')
+tree_train = hclust(cosine_dist_mat)
+plot(tree_train)
+clust5 = cutree(tree_train, k=5)
+```
+
+```{r,echo=FALSE, include=FALSE}
+X = as.matrix(tfidf_C50train)
+summary(colSums(X))
+PCA_C50train = prcomp(X, scale=TRUE)
+
+Y = as.matrix(tfidf_C50test)
+summary(colSums(Y))
+PCA_C50test = prcomp(Y, scale=TRUE)
+
+PCA_C50train2 = PCA_C50train$x[,1:600]
+PCA_C50test2 = PCA_C50test$x[,1:600]
+```
+
+
+Then, we decide to use the KNN model with K=5 to predict the author's distribution. We have try other models too, we have try logit model, random forest model and the SVM model, but for some reasons, they cannot work, or after we run the model, we find that the accuracy of those model are too low, like 0.04 of random forest model. Hence, here we decide to use the KNN model and we also use the KNN model to predict both of the testing and training test.
+
+```{r,echo=FALSE, include=FALSE, message = FALSE, warning = FALSE}
+N = nrow(PCA_C50train2)
+K = 5
+fold_id = rep_len(1:K, N)
+fold_id = sample(fold_id, replace=FALSE)
+acc_knn = 0
+for(i in 1:K) {
+  train_set_id = which(fold_id != i)
+  knn_yhat_test = knn(k = 10, train = as.matrix(PCA_C50train2[train_set_id,]), test = as.matrix(PCA_C50train2[-train_set_id,]), cl = as.factor(labels_C50train[train_set_id]))
+
+  y_test = as.factor(labels_C50train[-train_set_id])
+  knn_yhat_test = factor(knn_yhat_test, levels=levels(y_test))
+  acc_knn = acc_knn + length(which(y_test == knn_yhat_test))
+}
+```
+
+The accuracy of the KNN model when predicting training set:
+
+```{r,echo=FALSE}
+summary(acc_knn)/2500
+```
+
+```{r,echo=FALSE, include=FALSE, message = FALSE, warning = FALSE}
+N = nrow(PCA_C50test2)
+K = 5
+fold_id = rep_len(1:K, N)
+fold_id = sample(fold_id, replace=FALSE)
+acc_knn = 0
+for(i in 1:K) {
+  train_set_id = which(fold_id != i)
+  knn_yhat_test = knn(k = 10, train = as.matrix(PCA_C50test2[train_set_id,]), test = as.matrix(PCA_C50test2[-train_set_id,]), cl = as.factor(labels_C50test[train_set_id]))
+
+  y_test = as.factor(labels_C50test[-train_set_id])
+  knn_yhat_test = factor(knn_yhat_test, levels=levels(y_test))
+  acc_knn = acc_knn + length(which(y_test == knn_yhat_test))
+}
+```
+
+The accuracy of the KNN model when predicting testing set:
+
+```{r,echo=FALSE}
+summary(acc_knn)/2500
+```
+
+
+
+
